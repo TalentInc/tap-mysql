@@ -47,11 +47,9 @@ def get_test_connection():
 
     return pymysql.connect(**creds)
 
-
 def discover_catalog(connection):
     catalog = tap_mysql.discover_catalog(connection)
     catalog.streams = [s for s in catalog.streams if s.database == DB_NAME]
-
     return catalog
 
 class TestTypeMapping(unittest.TestCase):
@@ -292,8 +290,6 @@ class TestSchemaMessages(unittest.TestCase):
             catalog.streams[0].stream = 'tab'
             catalog.streams[0].schema.selected = True
             catalog.streams[0].schema.properties['a'].selected = True
-            set_replication_method_and_key(catalog.streams[0], 'FULL_TABLE', None)
-
             messages = list(tap_mysql.generate_messages(con, catalog, tap_mysql.build_state({}, catalog)))
             schema_message = list(filter(lambda m: isinstance(m, singer.SchemaMessage), messages))[0]
             self.assertTrue(isinstance(schema_message, singer.SchemaMessage))
@@ -328,7 +324,6 @@ class TestCurrentStream(unittest.TestCase):
             stream.key_properties = []
             stream.schema.properties['val'].selected = True
             stream.stream = stream.table
-            set_replication_method_and_key(stream, 'FULL_TABLE', None)
 
     def tearDown(self):
         if self.con:
@@ -368,7 +363,6 @@ class TestStreamVersionFullTable(unittest.TestCase):
             stream.key_properties = []
             stream.schema.properties['val'].selected = True
             stream.stream = stream.table
-            set_replication_method_and_key(stream, 'FULL_TABLE', None)
 
     def tearDown(self):
         if self.con:
@@ -440,13 +434,12 @@ class TestIncrementalReplication(unittest.TestCase):
             cursor.execute('INSERT INTO integer_incremental (val, updated) VALUES (3, 3)')
 
         self.catalog = discover_catalog(self.con)
-
         for stream in self.catalog.streams:
             stream.schema.selected = True
             stream.key_properties = []
             stream.schema.properties['val'].selected = True
             stream.stream = stream.table
-            set_replication_method_and_key(stream, 'INCREMENTAL', 'updated')
+            set_replication_method_and_key(stream, None, 'updated')
 
     def tearDown(self):
         if self.con:
@@ -552,7 +545,7 @@ class TestViews(unittest.TestCase):
         self.assertEqual(
             primary_keys,
             {'a_table': ['id'],
-             'a_view': []})
+             'a_view': None})
 
 class TestEscaping(unittest.TestCase):
 
@@ -562,25 +555,18 @@ class TestEscaping(unittest.TestCase):
             cursor.execute('CREATE TABLE a (`b c` int)')
             cursor.execute('INSERT INTO a (`b c`) VALUES (1)')
 
-        self.catalog = discover_catalog(self.con)
-
-        self.catalog = discover_catalog(self.con)
-        self.catalog.streams[0].stream = 'some_stream_name'
-        self.catalog.streams[0].schema.selected = True
-        self.catalog.streams[0].key_properties = []
-        self.catalog.streams[0].schema.properties['b c'].selected = True
-
-        set_replication_method_and_key(self.catalog.streams[0], 'FULL_TABLE', None)
-
     def tearDown(self):
         if self.con:
             self.con.close()
 
     def runTest(self):
-        messages = tap_mysql.generate_messages(self.con, self.catalog, tap_mysql.build_state({}, self.catalog))
-
+        catalog = discover_catalog(self.con)
+        catalog.streams[0].stream = 'some_stream_name'
+        catalog.streams[0].schema.selected = True
+        catalog.streams[0].key_properties = []
+        catalog.streams[0].schema.properties['b c'].selected = True
+        messages = tap_mysql.generate_messages(self.con, catalog, tap_mysql.build_state({}, catalog))
         record_message = list(filter(lambda m: isinstance(m, singer.RecordMessage), messages))[0]
-
         self.assertTrue(isinstance(record_message, singer.RecordMessage))
         self.assertEqual(record_message.record, {'b c': 1})
 
@@ -605,12 +591,12 @@ class TestUnsupportedPK(unittest.TestCase):
         for c in catalog.streams:
             primary_keys[c.table] = singer.metadata.to_map(c.metadata).get((), {}).get('table-key-properties')
 
-        self.assertEqual(primary_keys, {'good_pk_tab': ['good_pk'], 'bad_pk_tab': []})
+        self.assertEqual(primary_keys, {'good_pk_tab': ['good_pk'], 'bad_pk_tab': None})
 
 
 
 
 if __name__== "__main__":
-    test1 = TestEscaping()
+    test1 = TestUnsupportedPK()
     test1.setUp()
     test1.runTest()
